@@ -1,0 +1,15 @@
+--// This is an example of how you would use the module!! 
+local UIParticleEmitter = require(script.UIParticleEmitter)(script.Parent)
+
+UIParticleEmitter.Reconfig{
+	Color = script.UIGradient.Color,
+	SpreadAngle = 60,
+	Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 10),
+		NumberSequenceKeypoint.new(0.2, 100),
+		NumberSequenceKeypoint.new(1, 0)
+	},
+	Texture = 75309286909772,
+	Acceleration = Vector2.new(2, -1),
+	RotationSpeed = 90
+}
