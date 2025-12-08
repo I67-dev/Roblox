@@ -1,0 +1,253 @@
+--!strict
+
+--// UI Particle Emitting System Module
+
+local RunService = game:GetService("RunService")
+
+-- Types
+export type ParticleConfig = {
+    Rate: number,
+    Size: number | NumberSequence,
+    Texture: number,
+    Transparency: number | NumberSequence,
+    Enabled: boolean,
+    Parent: Instance,
+    Acceleration: Vector2,
+    Lifetime: number | NumberRange,
+    Color: Color3 | ColorSequence,
+    SpreadAngle: number,
+    Direction: "Up" | "Down" | "Left" | "Right",
+    Speed: number,
+    Rotation: number | NumberRange,
+    RotationSpeed: number | NumberRange,
+    ZIndex: number,
+}
+
+export type ParticleState = {
+    Instance: ImageLabel,
+    Elapsed: number,
+    Lifetime: number,
+    Position: Vector2,
+    Speed: Vector2,
+    RotationSpeed: number,
+}
+
+export type ParticleSystem = {
+    Config: ParticleConfig,
+    Emit: (amount: number?) -> (),
+    Reconfig: (config: { [string]: any }?) -> (),
+}
+
+-- Main function
+return function(Object: Instance): ParticleSystem
+    local self: ParticleSystem = {} :: any
+
+    -- Configuration
+    self.Config = {
+        Rate = 20,
+        Size = 40,
+        Texture = 3113323162,
+        Transparency = 0,
+        Enabled = true,
+        Parent = Object,
+        Acceleration = Vector2.zero,
+        Lifetime = 1,
+        Color = Color3.new(1,1,1),
+        SpreadAngle = 0,
+        Direction = "Up",
+        Speed = 1,
+        Rotation = 0,
+        RotationSpeed = 0,
+        ZIndex = 1,
+    }
+
+    local particles: {ParticleState} = {}
+    local accumulator: number = 0
+
+    -- Convert direction string into a normalized vector
+    local function getDirectionVector(direction: "Up" | "Down" | "Left" | "Right"): Vector2
+        if direction == "Up" then return Vector2.new(0, -1) end
+        if direction == "Down" then return Vector2.new(0, 1) end
+        if direction == "Left" then return Vector2.new(-1, 0) end
+        if direction == "Right" then return Vector2.new(1, 0) end
+        return Vector2.new(0, 0)
+    end
+
+    -- Handle NumberRange values by sampling randomly within the range
+    local function getRandomRange(value: number | NumberRange): number
+        if typeof(value) == "NumberRange" then
+            local nr = value :: NumberRange
+            return math.random(nr.Min*100, nr.Max*100)/100
+        else
+            return value :: number
+        end
+    end
+
+    -- Emit a single particle with randomized properties
+    local function singleEmission(): ()
+        local Particle: ImageLabel = Instance.new("ImageLabel")
+        Particle.Name = "Particle"
+        Particle.BackgroundTransparency = 1
+        Particle.ZIndex = self.Config.ZIndex
+
+        -- Resolve initial values
+        local size: number = if typeof(self.Config.Size) == "NumberSequence"
+            then (self.Config.Size :: NumberSequence).Keypoints[1].Value
+            else self.Config.Size :: number
+
+        local trans: number = if typeof(self.Config.Transparency) == "NumberSequence"
+            then (self.Config.Transparency :: NumberSequence).Keypoints[1].Value
+            else self.Config.Transparency :: number
+
+        local color: Color3 = if typeof(self.Config.Color) == "ColorSequence"
+            then (self.Config.Color :: ColorSequence).Keypoints[1].Value
+            else self.Config.Color :: Color3
+
+        Particle.ImageContent = Content.fromAssetId(self.Config.Texture)
+        Particle.ImageColor3 = color
+        Particle.Size = UDim2.fromOffset(size, size)
+        Particle.ImageTransparency = trans
+        Particle.Rotation = getRandomRange(self.Config.Rotation)
+        Particle.Position = UDim2.fromScale(math.random(), math.random())
+        Particle.AnchorPoint = Vector2.new(.5, .5)
+        Particle.Parent = self.Config.Parent
+
+        -- Lifetime can be fixed or randomized
+        local lifetime: number = if typeof(self.Config.Lifetime) == "number"
+            then self.Config.Lifetime :: number
+            else math.random((self.Config.Lifetime :: NumberRange).Min*100, (self.Config.Lifetime :: NumberRange).Max*100)/100
+
+        -- Calculate emission direction with optional spread angle
+        local dir: Vector2 = getDirectionVector(self.Config.Direction)
+        local angleOffset: number = math.rad(math.random(-self.Config.SpreadAngle/2, self.Config.SpreadAngle/2))
+        local rotatedDir: Vector2 = Vector2.new(
+            dir.X * math.cos(angleOffset) - dir.Y * math.sin(angleOffset),
+            dir.X * math.sin(angleOffset) + dir.Y * math.cos(angleOffset)
+        ) * self.Config.Speed
+
+        table.insert(particles, {
+            Instance = Particle,
+            Elapsed = 0,
+            Lifetime = lifetime,
+            Position = Vector2.new(Particle.Position.X.Scale, Particle.Position.Y.Scale),
+            Speed = rotatedDir,
+            RotationSpeed = getRandomRange(self.Config.RotationSpeed),
+        })
+    end
+
+    -- Emit particles with custom amounts
+    function self.Emit(amount: number?): ()
+        if typeof(self.Config.Parent) ~= "Instance" then return end
+        local amt: number = amount or self.Config.Rate
+        for i = 1, amt do
+            singleEmission()
+        end
+    end
+
+    -- Update configuration during run-time
+    function self.Reconfig(config: { [string]: any }?): ()
+        if not config then return end
+        for i,v in pairs(config) do
+            if (self.Config :: any)[i] ~= nil then
+                (self.Config :: any)[i] = v
+            end
+        end
+    end
+
+    -- Update loop
+    local function upd(dt: number): ()
+        if self.Config.Enabled and self.Config.Rate > 0 then
+            accumulator += math.min(9999, self.Config.Rate) * dt
+            if accumulator >= 1 then
+                local emits: number = math.floor(accumulator)
+                for i = 1, emits do singleEmission() end
+                accumulator -= emits
+            end
+        end
+
+        -- Helpers
+        local function sampleColorSequence(seq: ColorSequence, t: number): Color3
+            local keys = seq.Keypoints
+            if #keys == 0 then return Color3.new(1,1,1) end
+            if t <= keys[1].Time then return keys[1].Value end
+            if t >= keys[#keys].Time then return keys[#keys].Value end
+            for i = 1, #keys-1 do
+                local k1, k2 = keys[i], keys[i+1]
+                if t >= k1.Time and t <= k2.Time then
+                    local alpha = (t - k1.Time) / (k2.Time - k1.Time)
+                    return k1.Value:Lerp(k2.Value, alpha)
+                end
+            end
+            return Color3.new(1,1,1)
+        end
+
+        local function sampleNumberSequence(seq: NumberSequence, t: number): number
+            local keys = seq.Keypoints
+            if #keys == 0 then return 0 end
+            if t <= keys[1].Time then return keys[1].Value end
+            if t >= keys[#keys].Time then return keys[#keys].Value end
+            for i = 1, #keys-1 do
+                local k1, k2 = keys[i], keys[i+1]
+                if t >= k1.Time and t <= k2.Time then
+                    local alpha = (t - k1.Time) / (k2.Time - k1.Time)
+                    return k1.Value + (k2.Value - k1.Value) * alpha
+                end
+            end
+            return 0
+        end
+
+        -- Iterate particles
+        local count: number = #particles
+        local i: number = 1
+        while i <= count do
+            local p: ParticleState = particles[i]
+            p.Elapsed += dt
+            local t: number = math.clamp(p.Elapsed / p.Lifetime,0,1)
+
+            if typeof(self.Config.Color) == "ColorSequence" then
+                p.Instance.ImageColor3 = sampleColorSequence(self.Config.Color :: ColorSequence,t)
+            end
+            if typeof(self.Config.Size) == "NumberSequence" then
+                local size = sampleNumberSequence(self.Config.Size :: NumberSequence,t)
+                p.Instance.Size = UDim2.new(0, size, 0, size)
+            end
+            if typeof(self.Config.Transparency) == "NumberSequence" then
+                p.Instance.ImageTransparency = sampleNumberSequence(self.Config.Transparency :: NumberSequence,t)
+            end
+
+            if p.RotationSpeed ~= 0 then
+                p.Instance.Rotation += p.RotationSpeed * dt
+            end 
+            -- Apply rotation and acceleration
+            if p.RotationSpeed ~= 0 then
+                p.Instance.Rotation += p.RotationSpeed * dt
+            end
+            if self.Config.Acceleration ~= Vector2.zero then
+                p.Speed += self.Config.Acceleration * dt
+            end
+
+            -- Update position
+            p.Position += p.Speed * dt
+            p.Instance.Position = UDim2.fromScale(p.Position.X, p.Position.Y)
+
+            -- Destroy expired particles
+            if p.Elapsed >= p.Lifetime then
+                p.Instance:Destroy()
+                if i ~= count then
+                    particles[i] = particles[count]
+                    particles[count] = nil
+                else
+                    particles[i] = nil
+                end
+                count -= 1
+            else
+                i += 1
+            end
+        end
+    end
+
+    -- Connect update loop to RenderStepped
+    RunService.RenderStepped:Connect(upd)
+
+    return self
+end
